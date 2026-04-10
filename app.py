@@ -45,12 +45,14 @@ html, body, [class*="css"] {
 
 /* Header */
 .bcai-header {
-    display: flex;
-    align-items: baseline;
-    gap: 1rem;
+    display: block;
     border-bottom: 3px solid var(--ink);
     padding-bottom: 0.75rem;
     margin-bottom: 2rem;
+}
+.bcai-header .bcai-sub {
+    display: block;
+    margin-top: 0.3rem;
 }
 .bcai-wordmark {
     font-family: 'Syne', sans-serif;
@@ -295,19 +297,10 @@ if step == 1:
     st.markdown("### Upload your SAS program")
     st.markdown('<p style="color:var(--muted);font-size:0.9rem;">Upload the <strong>complete</strong> SAS file — DATA steps, PROC SORT, PROC MEANS, ODS statements, TITLE/FOOTNOTE, and all plot PROCs.</p>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns([3, 2])
-    with col1:
-        uploaded = st.file_uploader("SAS file (.sas)", type=["sas", "txt"], label_visibility="collapsed")
-        if uploaded:
-            st.session_state.sas_code = uploaded.read().decode("utf-8", errors="replace")
-            st.success(f"✓ Loaded **{uploaded.name}** — {len(st.session_state.sas_code):,} characters")
-
-    with col2:
-        st.markdown("**Or paste SAS code directly:**")
-        pasted = st.text_area("SAS code", value=st.session_state.sas_code, height=300, label_visibility="collapsed",
-                              placeholder="proc sgplot data=mydata;\n  scatter x=age y=salary / group=dept;\n  reg x=age y=salary;\nrun;")
-        if pasted:
-            st.session_state.sas_code = pasted
+    uploaded = st.file_uploader("SAS file (.sas)", type=["sas", "txt"], label_visibility="collapsed")
+    if uploaded:
+        st.session_state.sas_code = uploaded.read().decode("utf-8", errors="replace")
+        st.success(f"✓ Loaded **{uploaded.name}** — {len(st.session_state.sas_code):,} characters")
 
     if st.session_state.sas_code:
         with st.expander("Preview uploaded code"):
