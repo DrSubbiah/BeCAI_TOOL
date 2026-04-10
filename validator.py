@@ -207,8 +207,6 @@ def build_validation_report(meta: list, plotly_code: str) -> dict:
         f"  Full Match:   {full}",
         f"  Approximate:  {approx}",
         f"  Not Found:    {none_}",
-        f"  N/A (not in SAS code): {na}",
-        f"  Total BCAI items: {len(rows)}",
         "",
         "=" * 80,
         "",
