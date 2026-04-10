@@ -41,7 +41,7 @@ html, body, [class*="css"] {
 }
 
 .main { background-color: var(--paper) !important; }
-.block-container { padding: 2rem 3rem !important; max-width: 1400px; }
+.block-container { padding: 3rem 3rem 2rem 3rem !important; max-width: 1400px; }
 
 /* Header */
 .bcai-header {
@@ -56,11 +56,12 @@ html, body, [class*="css"] {
 }
 .bcai-wordmark {
     font-family: 'Syne', sans-serif;
-    font-size: 2.6rem;
+    font-size: 2.2rem;
     font-weight: 800;
     letter-spacing: -1px;
     color: var(--ink);
-    line-height: 1;
+    line-height: 1.3;
+    padding-top: 0.5rem;
 }
 .bcai-wordmark span { color: var(--accent); }
 .bcai-sub {
@@ -256,12 +257,7 @@ hr { border-color: var(--border) !important; margin: 2rem 0 !important; }
 """, unsafe_allow_html=True)
 
 # ── Header ──────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="bcai-header">
-  <div class="bcai-wordmark">Be<span>C</span>AI</div>
-  <div class="bcai-sub">SAS Plot Metadata Extractor &amp; Plotly Code Generator</div>
-</div>
-""", unsafe_allow_html=True)
+st.title("BeCAI — SAS Plot Metadata Extractor & Plotly Code Generator")
 
 # ── Session state ───────────────────────────────────────────────────────────────
 if "step" not in st.session_state:
