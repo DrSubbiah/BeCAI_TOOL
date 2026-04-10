@@ -252,7 +252,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"_y = df.loc[_X.index, '{y_var}']")
             a(f"_model = sm.OLS(_y, _X).fit()")
             a(f"_x_range = np.linspace(df['{x_var}'].min(), df['{x_var}'].max(), 200)")
-            a(f"_y_pred = _model.params[0] + _model.params[1] * _x_range")
+            a(f"_y_pred = _model.params.iloc[0] + _model.params.iloc[1] * _x_range")
             a(f"fig.add_trace(go.Scatter(")
             a(f"    x=_x_range, y=_y_pred,")
             a(f"    mode='lines',")
