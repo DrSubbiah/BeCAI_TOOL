@@ -329,14 +329,12 @@ elif step == 2:
     st.markdown("---")
 
     # Summary metrics
-    total = len(meta)
     found = sum(1 for m in meta if m["value"] not in ("", None, "not found"))
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Total BCAI Items", total)
-    c2.metric("Detected", found)
-    c3.metric("B — Base", sum(1 for m in meta if m["pillar"] == "B" and m["value"] not in ("", None, "not found")))
-    c4.metric("C — Context", sum(1 for m in meta if m["pillar"] == "C" and m["value"] not in ("", None, "not found")))
-    c5.metric("A+I", sum(1 for m in meta if m["pillar"] in ("A", "I") and m["value"] not in ("", None, "not found")))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Detected", found)
+    c2.metric("B — Base", sum(1 for m in meta if m["pillar"] == "B" and m["value"] not in ("", None, "not found")))
+    c3.metric("C — Context", sum(1 for m in meta if m["pillar"] == "C" and m["value"] not in ("", None, "not found")))
+    c4.metric("A+I", sum(1 for m in meta if m["pillar"] in ("A", "I") and m["value"] not in ("", None, "not found")))
 
     st.markdown("---")
 
@@ -445,13 +443,11 @@ elif step == 4:
         full = sum(1 for r in rows if r["match"] == "FULL")
         approx = sum(1 for r in rows if r["match"] == "APPROXIMATE")
         none_ = sum(1 for r in rows if r["match"] == "NOT FOUND")
-        na = sum(1 for r in rows if r["match"] == "N/A")
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         c1.metric("✅ Full Match", full)
         c2.metric("⚠️ Approximate", approx)
         c3.metric("❌ Not Found", none_)
-        c4.metric("— Not Applicable", na)
 
     st.markdown("---")
 
