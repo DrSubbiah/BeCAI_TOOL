@@ -41,27 +41,24 @@ html, body, [class*="css"] {
 }
 
 .main { background-color: var(--paper) !important; }
-.block-container { padding: 3rem 3rem 2rem 3rem !important; max-width: 1400px; }
+.block-container { padding: 2rem 3rem !important; max-width: 1400px; }
 
 /* Header */
 .bcai-header {
-    display: block;
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
     border-bottom: 3px solid var(--ink);
     padding-bottom: 0.75rem;
     margin-bottom: 2rem;
 }
-.bcai-header .bcai-sub {
-    display: block;
-    margin-top: 0.3rem;
-}
 .bcai-wordmark {
     font-family: 'Syne', sans-serif;
-    font-size: 2.2rem;
+    font-size: 2.6rem;
     font-weight: 800;
     letter-spacing: -1px;
     color: var(--ink);
-    line-height: 1.3;
-    padding-top: 0.5rem;
+    line-height: 1;
 }
 .bcai-wordmark span { color: var(--accent); }
 .bcai-sub {
@@ -257,7 +254,12 @@ hr { border-color: var(--border) !important; margin: 2rem 0 !important; }
 """, unsafe_allow_html=True)
 
 # ── Header ──────────────────────────────────────────────────────────────────────
-st.title("BeCAI — SAS Plot Metadata Extractor & Plotly Code Generator")
+st.markdown("""
+<div class="bcai-header">
+  <div class="bcai-wordmark">Be<span>C</span>AI</div>
+  <div class="bcai-sub">SAS Plot Metadata Extractor &amp; Plotly Code Generator</div>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Session state ───────────────────────────────────────────────────────────────
 if "step" not in st.session_state:
@@ -293,10 +295,19 @@ if step == 1:
     st.markdown("### Upload your SAS program")
     st.markdown('<p style="color:var(--muted);font-size:0.9rem;">Upload the <strong>complete</strong> SAS file — DATA steps, PROC SORT, PROC MEANS, ODS statements, TITLE/FOOTNOTE, and all plot PROCs.</p>', unsafe_allow_html=True)
 
-    uploaded = st.file_uploader("SAS file (.sas)", type=["sas", "txt"], label_visibility="collapsed")
-    if uploaded:
-        st.session_state.sas_code = uploaded.read().decode("utf-8", errors="replace")
-        st.success(f"✓ Loaded **{uploaded.name}** — {len(st.session_state.sas_code):,} characters")
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        uploaded = st.file_uploader("SAS file (.sas)", type=["sas", "txt"], label_visibility="collapsed")
+        if uploaded:
+            st.session_state.sas_code = uploaded.read().decode("utf-8", errors="replace")
+            st.success(f"✓ Loaded **{uploaded.name}** — {len(st.session_state.sas_code):,} characters")
+
+    with col2:
+        st.markdown("**Or paste SAS code directly:**")
+        pasted = st.text_area("SAS code", value=st.session_state.sas_code, height=300, label_visibility="collapsed",
+                              placeholder="proc sgplot data=mydata;\n  scatter x=age y=salary / group=dept;\n  reg x=age y=salary;\nrun;")
+        if pasted:
+            st.session_state.sas_code = pasted
 
     if st.session_state.sas_code:
         with st.expander("Preview uploaded code"):
@@ -329,12 +340,14 @@ elif step == 2:
     st.markdown("---")
 
     # Summary metrics
+    total = len(meta)
     found = sum(1 for m in meta if m["value"] not in ("", None, "not found"))
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Detected", found)
-    c2.metric("B — Base", sum(1 for m in meta if m["pillar"] == "B" and m["value"] not in ("", None, "not found")))
-    c3.metric("C — Context", sum(1 for m in meta if m["pillar"] == "C" and m["value"] not in ("", None, "not found")))
-    c4.metric("A+I", sum(1 for m in meta if m["pillar"] in ("A", "I") and m["value"] not in ("", None, "not found")))
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total BCAI Items", total)
+    c2.metric("Detected", found)
+    c3.metric("B — Base", sum(1 for m in meta if m["pillar"] == "B" and m["value"] not in ("", None, "not found")))
+    c4.metric("C — Context", sum(1 for m in meta if m["pillar"] == "C" and m["value"] not in ("", None, "not found")))
+    c5.metric("A+I", sum(1 for m in meta if m["pillar"] in ("A", "I") and m["value"] not in ("", None, "not found")))
 
     st.markdown("---")
 
@@ -387,9 +400,23 @@ elif step == 2:
     with col_fwd:
         if st.button("Generate Plotly Code →"):
             with st.spinner("Generating Plotly Python code..."):
-                idx = st.session_state.selected_proc_idx
-                block = proc_blocks[idx] if proc_blocks else {}
-                st.session_state.plotly_code = generate_plotly_code(meta, block, parsed)
+                all_code = []
+                imports_done = False
+                blocks_to_gen = proc_blocks if proc_blocks else [{}]
+                for i, blk in enumerate(blocks_to_gen):
+                    blk["fig_index"] = i + 1
+                    chunk = generate_plotly_code(meta, blk, parsed)
+                    if imports_done:
+                        chunk = "\n".join(
+                            l for l in chunk.splitlines()
+                            if not l.startswith(("import ", "from ", "df = ", "# df =", "# Replace", "# \u2500\u2500 Data"))
+                        )
+                    all_code.append(f"# {'='*60}")
+                    all_code.append(f"# Figure {i+1}: PROC {blk.get('proc_name','SGPLOT')} — dataset: {blk.get('dataset','df')}")
+                    all_code.append(f"# {'='*60}")
+                    all_code.append(chunk)
+                    imports_done = True
+                st.session_state.plotly_code = "\n\n".join(all_code)
             st.session_state.step = 3
             st.rerun()
 
@@ -443,11 +470,13 @@ elif step == 4:
         full = sum(1 for r in rows if r["match"] == "FULL")
         approx = sum(1 for r in rows if r["match"] == "APPROXIMATE")
         none_ = sum(1 for r in rows if r["match"] == "NOT FOUND")
+        na = sum(1 for r in rows if r["match"] == "N/A")
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("✅ Full Match", full)
         c2.metric("⚠️ Approximate", approx)
         c3.metric("❌ Not Found", none_)
+        c4.metric("— Not Applicable", na)
 
     st.markdown("---")
 

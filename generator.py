@@ -100,10 +100,16 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
     lineparms = block.get("lineparms", [])
     panelby = block.get("panelby", {})
     ods = parsed.get("ods", {})
-    titles = parsed.get("titles", {})
+    # Use scoped titles captured near this PROC block; fall back to global
+    scoped = block.get("scoped_titles", {})
+    titles = scoped if scoped else parsed.get("titles", {})
     fns = parsed.get("footnotes", {})
     title1 = titles.get("title", titles.get("title1", {}))
     fn1 = fns.get("footnote", fns.get("footnote1", {}))
+
+    # fig variable name — one per PROC block in multi-PROC files
+    fig_idx = block.get("fig_index", "")
+    fig_var = f"fig{fig_idx}" if str(fig_idx) != "" else "fig"
 
     lines = []
     a = lines.append
@@ -117,10 +123,14 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
     a("")
 
     # ── Data loading placeholder ────────────────────────────────────────────────
+    # Sanitize dataset name: work.sales → sales, lib.ds → ds
+    ds_clean = dataset.split(".")[-1] if "." in dataset else dataset
     a(f"# ── Data ──────────────────────────────────────────────────────────────────")
     a(f"# Replace with your actual data loading")
-    a(f"# df = pd.read_csv('your_data.csv')  # or pd.read_sas('{dataset}.sas7bdat')")
-    a(f"df = {dataset}  # SAS dataset: {dataset}")
+    a(f"# Option 1: df = pd.read_csv('your_data.csv')")
+    a(f"# Option 2: df = pd.read_sas('{ds_clean}.sas7bdat')")
+    a(f"# Option 3: df = pd.read_excel('{ds_clean}.xlsx')")
+    a(f"df = pd.DataFrame()  # ← replace with your actual data load (SAS dataset: {dataset})")
     a("")
 
     # ── Pre-processing from C-layer ──────────────────────────────────────────────
@@ -149,9 +159,18 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             t = t.strip()
             if t:
                 a(f"# SAS: {t}")
-                # Attempt Python translation
-                py = t.replace("log(", "np.log(").replace("sqrt(", "np.sqrt(").replace("exp(", "np.exp(")
-                a(f"# df['{t.split('=')[0].strip()}'] = {py.split('=',1)[-1].strip()}")
+                # Translate SAS functions to Python/numpy
+                py = t
+                py = re.sub(r'\blog\s*\(', "np.log(", py, flags=re.IGNORECASE)
+                py = re.sub(r'\bsqrt\s*\(', "np.sqrt(", py, flags=re.IGNORECASE)
+                py = re.sub(r'\bexp\s*\(', "np.exp(", py, flags=re.IGNORECASE)
+                py = re.sub(r'\babs\s*\(', "np.abs(", py, flags=re.IGNORECASE)
+                py = re.sub(r'\bint\s*\(', "int(", py, flags=re.IGNORECASE)
+                parts = py.split("=", 1)
+                if len(parts) == 2:
+                    col = parts[0].strip()
+                    expr = parts[1].strip()
+                    a(f"df['{col}'] = {expr}")
         a("")
 
     if proc_means:
@@ -170,12 +189,14 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
 
     a(f"# ── Figure ───────────────────────────────────────────────────────────────")
     if has_y2:
-        a(f"fig = make_subplots(specs=[[{{\"secondary_y\": True}}]])")
+        a(f"{fig_var} = make_subplots(specs=[[{{\"secondary_y\": True}}]])")
+        a(f"# Dual-axis: primary Y (left) and Y2 (right)")
     elif has_facets:
         facet_var = panelby["variable"]
         a(f"# SGPANEL → faceted figure via px")
+        a(f"{fig_var} = go.Figure()")
     else:
-        a(f"fig = go.Figure()")
+        a(f"{fig_var} = go.Figure()")
     a("")
 
     # ── Traces ──────────────────────────────────────────────────────────────────
@@ -201,7 +222,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"# B-layer: Scatter plot")
             if group:
                 a(f"for grp, gdf in df.groupby('{group}'):")
-                a(f"    fig.add_trace(go.Scatter(")
+                a(f"    {fig_var}.add_trace(go.Scatter(")
                 a(f"        x=gdf['{x_var}'], y=gdf['{y_var}'],")
                 a(f"        mode='markers',")
                 a(f"        name=str(grp),")
@@ -213,7 +234,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
                 a(f"        ),")
                 a(f"    ))")
             else:
-                a(f"fig.add_trace(go.Scatter(")
+                a(f"{fig_var}.add_trace(go.Scatter(")
                 a(f"    x=df['{x_var}'], y=df['{y_var}'],")
                 a(f"    mode='markers',")
                 a(f"    name='{y_var}',")
@@ -229,7 +250,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"# B-layer: Line series")
             if group:
                 a(f"for grp, gdf in df.groupby('{group}'):")
-                a(f"    fig.add_trace(go.Scatter(")
+                a(f"    {fig_var}.add_trace(go.Scatter(")
                 a(f"        x=gdf['{x_var}'], y=gdf['{y_var}'],")
                 a(f"        mode='lines+markers',")
                 a(f"        name=str(grp),")
@@ -237,7 +258,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
                 a(f"        marker=dict(symbol={_repr(ms)}, size={msize}),")
                 a(f"    ))")
             else:
-                a(f"fig.add_trace(go.Scatter(")
+                a(f"{fig_var}.add_trace(go.Scatter(")
                 a(f"    x=df['{x_var}'], y=df['{y_var}'],")
                 a(f"    mode='lines+markers',")
                 a(f"    name='{y_var}',")
@@ -248,22 +269,32 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
         elif stype == "reg":
             a(f"# C-layer: OLS regression line overlay")
             a(f"import statsmodels.api as sm")
-            a(f"_X = sm.add_constant(df['{x_var}'].dropna())")
-            a(f"_y = df.loc[_X.index, '{y_var}']")
-            a(f"_model = sm.OLS(_y, _X).fit()")
-            a(f"_x_range = np.linspace(df['{x_var}'].min(), df['{x_var}'].max(), 200)")
-            a(f"_y_pred = _model.params.iloc[0] + _model.params.iloc[1] * _x_range")
-            a(f"fig.add_trace(go.Scatter(")
-            a(f"    x=_x_range, y=_y_pred,")
-            a(f"    mode='lines',")
-            a(f"    name='Regression line',")
-            a(f"    line=dict(color={_repr(lc or 'blue')}, dash={_repr(ld or 'solid')}, width={lt}),")
-            a(f"))")
+            if group:
+                a(f"for _grp, _gdf in df.groupby('{group}'):")
+                a(f"    _Xg = sm.add_constant(_gdf['{x_var}'].dropna())")
+                a(f"    _yg = _gdf.loc[_Xg.index, '{y_var}']")
+                a(f"    _mg = sm.OLS(_yg, _Xg).fit()")
+                a(f"    _xrg = np.linspace(_gdf['{x_var}'].min(), _gdf['{x_var}'].max(), 200)")
+                a(f"    _ypg = _mg.params.iloc[0] + _mg.params.iloc[1] * _xrg")
+                a(f"    {fig_var}.add_trace(go.Scatter(x=_xrg, y=_ypg, mode='lines',")
+                a(f"        name=f'Reg ({{_grp}})', line=dict(dash={_repr(ld or 'solid')}, width={lt})))")
+            else:
+                a(f"_X = sm.add_constant(df['{x_var}'].dropna())")
+                a(f"_y = df.loc[_X.index, '{y_var}']")
+                a(f"_model = sm.OLS(_y, _X).fit()")
+                a(f"_x_range = np.linspace(df['{x_var}'].min(), df['{x_var}'].max(), 200)")
+                a(f"_y_pred = _model.params.iloc[0] + _model.params.iloc[1] * _x_range")
+                a(f"{fig_var}.add_trace(go.Scatter(")
+                a(f"    x=_x_range, y=_y_pred,")
+                a(f"    mode='lines',")
+                a(f"    name='Regression line',")
+                a(f"    line=dict(color={_repr(lc or 'blue')}, dash={_repr(ld or 'solid')}, width={lt}),")
+                a(f"))")
             if stmt.get("clm") or block.get("clm"):
                 a(f"# C-layer: Confidence band (CLM — mean CI)")
                 a(f"_pred = _model.get_prediction(sm.add_constant(_x_range))")
                 a(f"_ci = _pred.summary_frame(alpha={stmt.get('alpha') or '0.05'})")
-                a(f"fig.add_trace(go.Scatter(")
+                a(f"{fig_var}.add_trace(go.Scatter(")
                 a(f"    x=np.concatenate([_x_range, _x_range[::-1]]),")
                 a(f"    y=np.concatenate([_ci['mean_ci_upper'], _ci['mean_ci_lower'][::-1]]),")
                 a(f"    fill='toself', fillcolor='rgba(0,100,255,0.15)',")
@@ -272,7 +303,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
                 a(f"))")
             if stmt.get("cli") or block.get("cli"):
                 a(f"# C-layer: Prediction interval (CLI — individual PI)")
-                a(f"fig.add_trace(go.Scatter(")
+                a(f"{fig_var}.add_trace(go.Scatter(")
                 a(f"    x=np.concatenate([_x_range, _x_range[::-1]]),")
                 a(f"    y=np.concatenate([_ci['obs_ci_upper'], _ci['obs_ci_lower'][::-1]]),")
                 a(f"    fill='toself', fillcolor='rgba(255,100,0,0.08)',")
@@ -284,7 +315,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"# C-layer: LOESS smoothing")
             a(f"from statsmodels.nonparametric.smoothers_lowess import lowess")
             a(f"_loess = lowess(df['{y_var}'], df['{x_var}'], frac=0.3)")
-            a(f"fig.add_trace(go.Scatter(")
+            a(f"{fig_var}.add_trace(go.Scatter(")
             a(f"    x=_loess[:, 0], y=_loess[:, 1],")
             a(f"    mode='lines',")
             a(f"    name='LOESS',")
@@ -293,7 +324,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
 
         elif stype == "histogram":
             a(f"# B-layer: Histogram")
-            a(f"fig.add_trace(go.Histogram(")
+            a(f"{fig_var}.add_trace(go.Histogram(")
             a(f"    x=df['{x_var}'],")
             a(f"    name='{x_var}',")
             a(f"    marker_color={_repr(mc or 'steelblue')},")
@@ -304,10 +335,18 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"# B-layer: {'Vertical' if stype=='vbar' else 'Horizontal'} bar chart")
             orientation = "'v'" if stype == "vbar" else "'h'"
             bw = stmt.get("barwidth")
-            a(f"fig.add_trace(go.Bar(")
-            a(f"    {'x' if stype=='vbar' else 'y'}=df['{x_var}'],")
-            a(f"    {'y' if stype=='vbar' else 'x'}=df['{y_var}'],")
-            a(f"    name='{y_var}',")
+            # BUG5 fix: use response= as y if present; first positional token as x
+            response_var = stmt.get("response", "")
+            bar_x = x_var or stmt.get("response", y_var)  # category axis
+            bar_y = response_var or y_var                  # value axis
+            a(f"{fig_var}.add_trace(go.Bar(")
+            if stype == "vbar":
+                a(f"    x=df['{bar_x}'],")
+                a(f"    y=df['{bar_y}'],")
+            else:
+                a(f"    x=df['{bar_y}'],")
+                a(f"    y=df['{bar_x}'],")
+            a(f"    name='{bar_y}',")
             a(f"    orientation={orientation},")
             if mc: a(f"    marker_color={_repr(mc)},")
             if bw: a(f"    width={float(bw) if bw else 0.7},")
@@ -317,15 +356,20 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
 
         elif stype in ("vbox", "hbox"):
             a(f"# B-layer: Box plot")
-            orientation = "'v'" if stype == "vbox" else "'h'"
-            a(f"fig.add_trace(go.Box(")
-            a(f"    {'y' if stype=='vbox' else 'x'}=df['{y_var}'],")
-            if x_var: a(f"    x=df['{x_var}'],")
+            cat_var = stmt.get("category", "") or x_var  # CATEGORY= is the grouping axis
+            fc_box  = _color(stmt.get("fill_color")) or None
+            wc      = _color(stmt.get("whiskerattrs_color"))
+            a(f"{fig_var}.add_trace(go.Box(")
+            if stype == "vbox":
+                a(f"    y=df['{y_var}'],")
+                if cat_var: a(f"    x=df['{cat_var}'],  # CATEGORY={cat_var}")
+            else:
+                a(f"    x=df['{y_var}'],")
+                if cat_var: a(f"    y=df['{cat_var}'],")
             a(f"    name='{y_var}',")
-            a(f"    orientation={orientation},")
-            if mc: a(f"    marker_color={_repr(mc)},")
-            wc = _color(stmt.get("whiskerattrs_color"))
-            if wc: a(f"    line_color={_repr(wc)},")
+            if fc_box: a(f"    fillcolor={_repr(fc_box)},")
+            if mc:     a(f"    marker_color={_repr(mc)},")
+            if wc:     a(f"    line_color={_repr(wc)},")
             a(f"    boxpoints='outliers',")
             a(f"))")
 
@@ -334,7 +378,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             upper = stmt.get("y") or "upper"
             lower = stmt.get("x") or "lower"
             fc = _color(stmt.get("fill_color")) or "rgba(100,150,255,0.2)"
-            a(f"fig.add_trace(go.Scatter(")
+            a(f"{fig_var}.add_trace(go.Scatter(")
             a(f"    x=pd.concat([df.index, df.index[::-1]]),")
             a(f"    y=pd.concat([df['{upper}'], df['{lower}'][::-1]]),")
             a(f"    fill='toself',")
@@ -346,7 +390,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
         elif stype == "bubble":
             a(f"# B-layer: Bubble chart")
             size_var = stmt.get("size", "")
-            a(f"fig.add_trace(go.Scatter(")
+            a(f"{fig_var}.add_trace(go.Scatter(")
             a(f"    x=df['{x_var}'], y=df['{y_var}'],")
             a(f"    mode='markers',")
             a(f"    name='{y_var}',")
@@ -369,19 +413,19 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"_cos, _sin = np.cos(np.radians(_theta)), np.sin(np.radians(_theta))")
             a(f"_ex = df['{x_var}'].mean() + _w/2*np.cos(_t)*_cos - _h/2*np.sin(_t)*_sin")
             a(f"_ey = df['{y_var}'].mean() + _w/2*np.cos(_t)*_sin + _h/2*np.sin(_t)*_cos")
-            a(f"fig.add_trace(go.Scatter(x=_ex, y=_ey, mode='lines', name='95% Ellipse',")
+            a(f"{fig_var}.add_trace(go.Scatter(x=_ex, y=_ey, mode='lines', name='95% Ellipse',")
             a(f"    line=dict(color={_repr(lc or 'gray')}, dash={_repr(ld or 'dash')})))")
 
         elif stype == "needle":
             a(f"# B-layer: Needle plot")
             a(f"for _, row in df.iterrows():")
-            a(f"    fig.add_shape(type='line',")
+            a(f"    {fig_var}.add_shape(type='line',")
             a(f"        x0=row['{x_var}'], x1=row['{x_var}'], y0=0, y1=row['{y_var}'],")
             a(f"        line=dict(color={_repr(lc or 'blue')}, width={lt}))")
 
         elif stype == "highlow":
             a(f"# B-layer: High-low plot")
-            a(f"fig.add_trace(go.Scatter(")
+            a(f"{fig_var}.add_trace(go.Scatter(")
             a(f"    x=df['{x_var}'], y=df['{y_var}'],")
             a(f"    error_y=dict(type='data', symmetric=False,")
             a(f"        array=df.get('high', df['{y_var}']),")
@@ -395,7 +439,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"from scipy.stats import gaussian_kde")
             a(f"_kde = gaussian_kde(df['{x_var}'].dropna())")
             a(f"_xr = np.linspace(df['{x_var}'].min(), df['{x_var}'].max(), 300)")
-            a(f"fig.add_trace(go.Scatter(x=_xr, y=_kde(_xr), mode='lines', name='KDE',")
+            a(f"{fig_var}.add_trace(go.Scatter(x=_xr, y=_kde(_xr), mode='lines', name='KDE',")
             a(f"    fill='tozeroy', line=dict(color={_repr(lc or 'steelblue')})))")
 
         # Datalabel annotation
@@ -405,7 +449,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             dls = _size_to_px(stmt.get("datalabelattrs_size")) or 12
             a(f"# A-layer: Data labels (DATALABEL={dl_var})")
             a(f"for _, row in df.iterrows():")
-            a(f"    fig.add_annotation(x=row['{x_var}'], y=row['{y_var}'],")
+            a(f"    {fig_var}.add_annotation(x=row['{x_var}'], y=row['{y_var}'],")
             a(f"        text=str(row['{dl_var}']), showarrow=False,")
             a(f"        font=dict(size={dls}{', color='+_repr(dlc) if dlc else ''}),)")
         a("")
@@ -420,10 +464,10 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             axis = (rl.get("axis") or "y").lower()
             val = rl.get("value", "0")
             if axis == "x":
-                a(f"fig.add_vline(x={val}, line=dict(color={_repr(rc)}, dash={_repr(rd)}, width={rt}),")
+                a(f"{fig_var}.add_vline(x={val}, line=dict(color={_repr(rc)}, dash={_repr(rd)}, width={rt}),")
                 a(f"    annotation_text={_repr(rl.get('label',''))}, annotation_position='top right')")
             else:
-                a(f"fig.add_hline(y={val}, line=dict(color={_repr(rc)}, dash={_repr(rd)}, width={rt}),")
+                a(f"{fig_var}.add_hline(y={val}, line=dict(color={_repr(rc)}, dash={_repr(rd)}, width={rt}),")
                 a(f"    annotation_text={_repr(rl.get('label',''))}, annotation_position='right')")
         a("")
 
@@ -435,7 +479,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             lpd = _line_dash(lp.get("pattern")) or "solid"
             a(f"_lp_x = np.array([df.index.min(), df.index.max()]) if hasattr(df.index, 'min') else np.array([0, 1])")
             a(f"_lp_y = {lp.get('y', 0)} + {lp.get('slope', 1)} * _lp_x")
-            a(f"fig.add_trace(go.Scatter(x=_lp_x, y=_lp_y, mode='lines',")
+            a(f"{fig_var}.add_trace(go.Scatter(x=_lp_x, y=_lp_y, mode='lines',")
             a(f"    name={_repr(lp.get('label','LINEPARM'))},")
             a(f"    line=dict(color={_repr(lpc)}, dash={_repr(lpd)}, width={float(lp.get('thickness') or 1)})))")
         a("")
@@ -495,7 +539,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
         layout_args.append(f"        showarrow=False, font=dict(size={fn_size}, color={_repr(fn_color)}),")
         layout_args.append(f"    )],")
 
-    a("fig.update_layout(")
+    a(f"{fig_var}.update_layout(")
     for la in layout_args:
         a(f"    {la.strip()}")
     a(")")
@@ -548,7 +592,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
         if ax.get("offsetmin") or ax.get("offsetmax"):
             args.append(f"# OFFSETMIN={ax.get('offsetmin','')} OFFSETMAX={ax.get('offsetmax','')} → not directly in Plotly; adjust range manually")
         if args:
-            a(f"fig.update_{axis_name}(")
+            a(f"{fig_var}.update_{axis_name}(")
             for arg in args:
                 a(f"    {arg},")
             a(")")
@@ -559,10 +603,22 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
     axis_update_args(yax, "yaxes")
     if y2ax:
         a("# A-layer: Second Y-axis (Y2AXIS)")
-        axis_update_args(y2ax, "yaxes(secondary_y=True)")
+        if has_y2:
+            # make_subplots secondary_y — update via layout directly
+            y2_args = []
+            if y2ax.get("label"):  y2_args.append(f"title_text={_repr(y2ax['label'])}")
+            if y2ax.get("min"):    y2_args.append(f"range=[{y2ax['min']}, {y2ax.get('max', 'None')}]")
+            if y2ax.get("color"):  y2_args.append(f"linecolor={_repr(_color(y2ax['color']))}")
+            if y2_args:
+                a(f"{fig_var}.update_layout(yaxis2=dict(")
+                for ya in y2_args:
+                    a(f"    {ya},")
+                a(f"))")
+        else:
+            axis_update_args(y2ax, "yaxes")
     if x2ax:
         a("# B-layer: Secondary X-axis (X2AXIS)")
-        a(f"fig.update_layout(xaxis2=dict(")
+        a(f"{fig_var}.update_layout(xaxis2=dict(")
         if x2ax.get("label"): a(f"    title_text={_repr(x2ax['label'])},")
         a(f"    overlaying='x', side='top',")
         a(f"))")
@@ -584,7 +640,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             ifc = _color(ins.get("font_color")) or "black"
             ifs = _size_to_px(ins.get("font_size")) or 12
             bgcolor = _color(ins.get("background")) or "rgba(255,255,255,0.8)"
-            a(f"fig.add_annotation(")
+            a(f"{fig_var}.add_annotation(")
             a(f"    xref='paper', yref='paper',")
             a(f"    x={px_coord}, y={py_coord},")
             a(f"    text={_repr(ins.get('text', ''))},")
@@ -592,7 +648,7 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
             a(f"    xanchor={_repr(xanchor)}, yanchor={_repr(yanchor)},")
             a(f"    font=dict(size={ifs}, color={_repr(ifc)}),")
             a(f"    bgcolor={_repr(bgcolor)},")
-            a(f"    bordercolor={'black' if ins.get('border') else repr('rgba(0,0,0,0)')},")
+            a(f"    bordercolor={'black' if not ins.get('border') else repr('rgba(0,0,0,0)')},")
             a(f"    borderwidth={'1' if ins.get('border') else '0'},")
             a(f")")
         a("")
@@ -605,15 +661,15 @@ def generate_plotly_code(meta: list, block: dict, parsed: dict) -> str:
         fname += ".html"
 
     if dest in ("HTML", ""):
-        a(f"fig.write_html({_repr(fname)})")
+        a(f"{fig_var}.write_html({_repr(fname)})")
         a(f"# fig.show()  # uncomment to display in browser")
     elif dest == "PDF":
-        a(f"fig.write_image({_repr(fname.replace('.html','.pdf'))})  # requires kaleido: pip install kaleido")
+        a(f"{fig_var}.write_image({_repr(fname.replace('.html','.pdf'))})  # requires kaleido: pip install kaleido")
     elif dest in ("PNG", "JPEG", "SVG"):
         ext = dest.lower()
-        a(f"fig.write_image({_repr(fname.replace('.html', '.'+ext))})  # requires kaleido")
+        a(f"{fig_var}.write_image({_repr(fname.replace('.html', '.'+ext))})  # requires kaleido")
     else:
-        a(f"fig.write_html({_repr(fname)})")
-        a(f"fig.show()")
+        a(f"{fig_var}.write_html({_repr(fname)})")
+        a(f"{fig_var}.show()")
 
     return "\n".join(lines)
