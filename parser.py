@@ -103,7 +103,7 @@ def parse_footnotes(code):
 # ── DATA STEPS ────────────────────────────────────────────────────────────────
 def parse_data_steps(code):
     steps = []
-    for m in re.finditer(r'\bdata\s+((?:\w+\.)?\w+)\s*;(.*?)(?=\brun\b|\bdata\s+\w|\bproc\s+\w)', code, re.IGNORECASE | re.DOTALL):
+    for m in re.finditer(r'\bdata\s+(\w+)\s*;(.*?)(?=\brun\b|\bdata\s+\w|\bproc\s+\w)', code, re.IGNORECASE | re.DOTALL):
         ds_name = m.group(1)
         body = m.group(2)
         transforms = []
@@ -185,49 +185,17 @@ def parse_proc_univariate(code):
 # ── PLOT PROCs ────────────────────────────────────────────────────────────────
 PLOT_PROCS = r'sgplot|sgpanel|sgscatter|reg|glm|mixed|univariate'
 
-def _extract_scoped_titles(pre_block_text):
-    """Extract TITLE statements from the text immediately before a PROC block."""
-    titles = {}
-    for m in re.finditer(
-        r'(title\d?)\s*(?:(?:bold\s+)?(?:italic\s+)?(?:font\s*=\s*["\']?\S+["\']?\s+)?'
-        r'(?:height\s*=\s*\S+\s+)?(?:color\s*=\s*\S+\s+)?(?:justify\s*=\s*\S+\s+)?)?'
-        r'["\']([^"\']+)["\']',
-        pre_block_text, re.IGNORECASE
-    ):
-        key = m.group(1).lower()
-        titles[key] = {
-            "text":   _clean(m.group(2)),
-            "font":   _get(r'font\s*=\s*["\']?(\S+)["\']?', m.group(0)),
-            "size":   _get(r'height\s*=\s*(\S+)', m.group(0)),
-            "color":  _get(r'color\s*=\s*(\S+)', m.group(0)),
-            "bold":   bool(re.search(r'\bbold\b', m.group(0), re.IGNORECASE)),
-            "italic": bool(re.search(r'\bitalic\b', m.group(0), re.IGNORECASE)),
-            "justify":_get(r'justify\s*=\s*(\w+)', m.group(0)),
-        }
-    return titles
-
-
 def parse_plot_procs(code):
     blocks = []
-    pattern = rf'(proc\s+(?:{PLOT_PROCS})\b[^;]*;)(.*?)(?:run\s*;|quit\s*;)'
+    pattern = rf'(proc\s+(?:{PLOT_PROCS})\b[^;]*;)(.*?)run\s*;'
     for m in re.finditer(pattern, code, re.IGNORECASE | re.DOTALL):
         header = m.group(1)
         body = m.group(2)
         full = header + body
         proc_name = _get(r'proc\s+(\w+)', header)
-
-        # ── Scoped title: look in the 400 chars before this PROC, or inside body ──
-        proc_start = m.start()
-        pre_text = code[max(0, proc_start - 400): proc_start]
-        scoped_titles = _extract_scoped_titles(pre_text)
-        # Also check for title INSIDE the proc body (SAS allows title inside proc)
-        body_titles = _extract_scoped_titles(body)
-        scoped_titles.update(body_titles)  # body titles override pre-proc titles
-
         block = {
             "proc_name": proc_name.upper(),
             "raw": full,
-            "scoped_titles": scoped_titles,
             "dataset":   _get(r'data\s*=\s*(\S+)', header),
             "out":       _get(r'out\s*=\s*(\S+)', header),
             "noautolegend": bool(re.search(r'\bnoautolegend\b', header, re.IGNORECASE)),
@@ -266,26 +234,13 @@ def parse_plot_statements(body, proc_name):
     for m in re.finditer(rf'\b({plot_kws})\s+([^;]+);', body, re.IGNORECASE):
         kw = m.group(1).lower()
         opts = m.group(2)
-        # For VBOX/HBOX the response var is the first bare word before '/'
-        vbox_y = ""
-        if kw in ("vbox", "hbox"):
-            vy = re.match(r'\s*(\w+)', opts)
-            vbox_y = vy.group(1) if vy else ""
-
-        # For VBAR/HBAR: first bare word before / is the category axis
-        bar_cat = ""
-        if kw in ("vbar", "hbar"):
-            bc = re.match(r'\s*(\w+)', opts)
-            bar_cat = bc.group(1) if bc else ""
         stmt = {
-            "type":     kw,
-            "x":        _get(r'\bx\s*=\s*(\w+)', opts) or (bar_cat if kw == "vbar" else ""),
-            "y":        _get(r'\by\s*=\s*(\w+)', opts) or vbox_y or _get(r'\bresponse\s*=\s*(\w+)', opts),
-            "y2":       _get(r'\by2\s*=\s*(\w+)', opts),
-            "x2":       _get(r'\bx2\s*=\s*(\w+)', opts),
-            "category": _get(r'\bcategory\s*=\s*(\w+)', opts),   # VBOX/HBOX category=
-            "response": _get(r'\bresponse\s*=\s*(\w+)', opts),   # VBAR/HBAR response=
-            "group":    _get(r'\bgroup\s*=\s*(\w+)', opts),
+            "type":  kw,
+            "x":     _get(r'\bx\s*=\s*(\w+)', opts),
+            "y":     _get(r'\by\s*=\s*(\w+)', opts),
+            "y2":    _get(r'\by2\s*=\s*(\w+)', opts),
+            "x2":    _get(r'\bx2\s*=\s*(\w+)', opts),
+            "group": _get(r'\bgroup\s*=\s*(\w+)', opts),
             "size":  _get(r'\bsize\s*=\s*(\w+)', opts),
             "colorresponse": _get(r'\bcolorresponse\s*=\s*(\w+)', opts),
             "markerchar":    _get(r'\bmarkerchar\s*=\s*(\w+)', opts),
@@ -332,10 +287,7 @@ def parse_plot_statements(body, proc_name):
 
 
 def parse_axis_stmt(axis, body):
-    # Anchor to start-of-statement (after newline or semicolon) to avoid
-    # matching axis keywords that appear as options inside plot statements
-    # e.g. "series ... / y2axis" must not match the y2axis statement itself
-    m = re.search(rf'(?:^|;|\n)\s*{axis}\s+([^;]+);', body, re.IGNORECASE)
+    m = re.search(rf'\b{axis}\s+([^;]+);', body, re.IGNORECASE)
     if not m:
         return {}
     opts = m.group(1)

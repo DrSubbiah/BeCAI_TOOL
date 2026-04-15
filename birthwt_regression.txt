@@ -1,0 +1,76 @@
+/* ============================================================
+   Birth Weight Regression Analysis
+   Response  : bweight
+   Continuous : gestwks
+   Categorical: ht (hypertension: yes/no), sex (male/female)
+   ============================================================ */
+
+/* Step 1: Import data */
+proc import datafile="BirthWt.xlsx"
+    out=birthwt
+    dbms=xlsx
+    replace;
+    getnames=yes;
+run;
+
+/* Step 2: Basic summary */
+proc means data=birthwt n mean std min max;
+    var bweight gestwks;
+run;
+
+proc freq data=birthwt;
+    tables ht sex;
+run;
+
+/* Step 3: Scatter plot — gestwks vs bweight, grouped by sex */
+proc sgplot data=birthwt;
+    scatter x=gestwks y=bweight / group=sex
+        markerattrs=(symbol=circlefilled size=7)
+        transparency=0.3;
+    reg x=gestwks y=bweight / group=sex
+        lineattrs=(thickness=2);
+    title "Birth Weight vs Gestational Weeks by Sex";
+    xaxis label="Gestational Weeks";
+    yaxis label="Birth Weight (g)";
+run;
+
+/* Step 4: Box plot — bweight by ht */
+proc sgplot data=birthwt;
+    vbox bweight / category=ht
+        fillattrs=(color=lightblue)
+        medianattrs=(color=red thickness=2);
+    title "Birth Weight by Hypertension Status";
+    xaxis label="Hypertension (ht)";
+    yaxis label="Birth Weight (g)";
+run;
+
+/* Step 5: Box plot — bweight by sex */
+proc sgplot data=birthwt;
+    vbox bweight / category=sex
+        fillattrs=(color=lightyellow)
+        medianattrs=(color=navy thickness=2);
+    title "Birth Weight by Sex";
+    xaxis label="Sex";
+    yaxis label="Birth Weight (g)";
+run;
+
+/* Step 6: Multiple regression
+   bweight = gestwks + ht + sex */
+proc glm data=birthwt plots=diagnostics;
+    class ht sex;
+    model bweight = gestwks ht sex / solution;
+    title "Multiple Regression: Birth Weight";
+run;
+quit;
+
+/* Step 7: Interaction plot — gestwks x ht */
+proc sgplot data=birthwt;
+    reg x=gestwks y=bweight / group=ht
+        lineattrs=(thickness=2);
+    scatter x=gestwks y=bweight / group=ht
+        markerattrs=(symbol=circlefilled size=6)
+        transparency=0.3;
+    title "Birth Weight vs Gestational Weeks by Hypertension";
+    xaxis label="Gestational Weeks";
+    yaxis label="Birth Weight (g)";
+run;
